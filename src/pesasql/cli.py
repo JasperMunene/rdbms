@@ -1,495 +1,242 @@
 """
-Command Line Interface Module - Interactive REPL for PesaSQL
-Provides SQL-like interface for database operations.
+Command Line Interface Module - Updated with Query Engine integration
 """
 
 import cmd
-import sys
-import shlex
-from typing import List
-from pathlib import Path
+import os
+
 
 from .storage.file_manager import FileManager
 from .catalog.catalog import Catalog
-from .catalog.schema import TableSchema, Column, DataType, ColumnConstraint
-from .storage.buffer_pool import BufferPool
+from .query.engine import QueryEngine
+from .parser.exceptions import PesaSQLParseError
+from .query.exceptions import PesaSQLExecutionError
 
 
 class PesaSQLREPL(cmd.Cmd):
-    """Interactive REPL for PesaSQL database"""
+    """Interactive REPL for PesaSQL database - Updated for Week 3"""
 
     intro = """
     ╔══════════════════════════════════════╗
     ║      PesaSQL Database System         ║
-    ║      Version 0.2 -  Day 1            ║
+    ║      Version 0.3 - Week 3            ║
+    ║      SQL Parser & Query Engine       ║
     ║      Type 'help' for commands        ║
     ╚══════════════════════════════════════╝
-
-    Welcome to PesaSQL! A lightweight RDBMS.
+    
+    Now with SQL support:
+      SELECT * FROM table [WHERE condition]
+      INSERT INTO table VALUES (val1, val2, ...)
+      CREATE DATABASE name
+      USE name
     """
     prompt = "pesasql> "
 
     def __init__(self):
-        """Initialize REPL"""
         super().__init__()
-        self.file_manager = None
-        self.catalog = None
-        self.buffer_pool = BufferPool(capacity=50)
-        self.current_db = None
+        self.engine = None
+        self.db_path = None
 
-    def parseline(self, line):
-        """Parse the line into a command name and string of arguments."""
-        cmd, arg, line = super().parseline(line)
-        if cmd:
-            cmd = cmd.lower()
-        return cmd, arg, line
+    def do_quit(self, arg):
+        """Exit the REPL"""
+        print("Goodbye!")
+        return True
 
-    def do_create(self, arg: str) -> None:
-        """
-        CREATE DATABASE <name> - Create new database
-        CREATE TABLE <name> (col1 type, col2 type, ...) - Create new table
+    def do_exit(self, arg):
+        """Exit the REPL"""
+        return self.do_quit(arg)
 
-        Examples:
-          CREATE DATABASE mydb
-          CREATE TABLE users (id INT PRIMARY KEY, name STRING(100), balance DOUBLE)
-        """
-        args = shlex.split(arg)
+    def do_EOF(self, arg):
+        """Exit on Ctrl-D"""
+        print()
+        return self.do_quit(arg)
 
-        if len(args) < 2:
-            print("Syntax: CREATE DATABASE <name>")
-            print("        CREATE TABLE <name> (col1 type, ...)")
-            return
-
-        command = args[0].upper()
-
-        if command == "DATABASE":
-            self._create_database(args[1])
-        elif command == "TABLE":
-            self._create_table(args[1:])
-        else:
-            print(f"Unknown CREATE command: {command}")
-
-    def _create_database(self, db_name: str) -> None:
-        """Create new database"""
+    def _create_database(self, db_name):
+        """Create a new database"""
+        if not db_name.endswith('.db'):
+            db_name += '.db'
+        
+        path = os.path.join(os.getcwd(), db_name)
         try:
-            # Ensure .db extension
-            if not db_name.endswith('.db'):
-                db_name += '.db'
-
-            # Check if exists
-            if Path(db_name).exists():
-                print(f"Database '{db_name}' already exists")
-                return
-
-            # Create database
-            self.file_manager = FileManager(db_name)
-            self.file_manager.create_database()
-
-            # Initialize catalog
-            self.catalog = Catalog(self.file_manager)
-            self.current_db = db_name
-
-            print(f"Database '{db_name}' created successfully")
-            print(f"Using buffer pool: {self.buffer_pool}")
-
+            fm = FileManager(path)
+            fm.create_database()
+            print(f"Database created: {db_name}")
+            # Auto-use
+            self._use_database(db_name)
         except Exception as e:
             print(f"Error creating database: {e}")
 
-    def _create_table(self, args: List[str]) -> None:
-        """Create new table"""
-        if not self.catalog:
-            print("No database selected. Use CREATE DATABASE first")
-            return
-
-        if len(args) < 2:
-            print("Syntax: CREATE TABLE <name> (col1 type, ...)")
-            return
-
-        table_name = args[0]
-
-        # Parse column definitions (simplified parser)
-        try:
-            # Join remaining args and extract column definitions
-            col_defs = ' '.join(args[1:])
-
-            # Remove parentheses if present
-            if col_defs.startswith('(') and col_defs.endswith(')'):
-                col_defs = col_defs[1:-1]
-
-            # Split by comma
-            col_parts = [c.strip() for c in col_defs.split(',')]
-
-            columns = []
-            for col_def in col_parts:
-                col_def = col_def.strip()
-                if not col_def:
-                    continue
-
-                # Parse column definition
-                # Format: name type [constraints]
-                parts = col_def.split()
-                if len(parts) < 2:
-                    print(f"Invalid column definition: {col_def}")
-                    return
-
-                col_name = parts[0]
-                col_type_str = parts[1].upper()
-
-                # Parse type
-                if col_type_str.startswith('STRING'):
-                    # Extract length
-                    if '(' in col_type_str and ')' in col_type_str:
-                        length_str = col_type_str[col_type_str.find('(') + 1:col_type_str.find(')')]
-                        try:
-                            max_length = int(length_str)
-                        except:
-                            max_length = 255
-                        data_type = DataType.STRING
-                    else:
-                        data_type = DataType.STRING
-                        max_length = 255
-                elif col_type_str == 'INT' or col_type_str == 'INTEGER':
-                    data_type = DataType.INTEGER
-                    max_length = 0
-                elif col_type_str == 'FLOAT':
-                    data_type = DataType.FLOAT
-                    max_length = 0
-                elif col_type_str == 'DOUBLE':
-                    data_type = DataType.DOUBLE
-                    max_length = 0
-                elif col_type_str == 'BOOLEAN' or col_type_str == 'BOOL':
-                    data_type = DataType.BOOLEAN
-                    max_length = 0
-                elif col_type_str == 'TIMESTAMP':
-                    data_type = DataType.TIMESTAMP
-                    max_length = 0
-                else:
-                    print(f"Unknown data type: {col_type_str}")
-                    return
-
-                # Parse constraints
-                constraints = []
-                for part in parts[2:]:
-                    part_upper = part.upper()
-                    if part_upper == 'PRIMARY' and 'KEY' in [p.upper() for p in parts]:
-                        constraints.append(ColumnConstraint.PRIMARY_KEY)
-                    elif part_upper == 'UNIQUE':
-                        constraints.append(ColumnConstraint.UNIQUE)
-                    elif part_upper == 'NOT' and 'NULL' in [p.upper() for p in parts]:
-                        constraints.append(ColumnConstraint.NOT_NULL)
-                    elif part_upper == 'PRIMARY_KEY':
-                        constraints.append(ColumnConstraint.PRIMARY_KEY)
-
-                # Create column
-                column = Column(
-                    name=col_name,
-                    data_type=data_type,
-                    max_length=max_length,
-                    constraints=constraints
-                )
-                columns.append(column)
-
-            # Create table schema
-            table_schema = TableSchema(name=table_name, columns=columns)
-
-            # Add to catalog
-            if self.catalog.create_table(table_schema):
-                print(f"Table '{table_name}' created successfully")
-            else:
-                print(f"Failed to create table '{table_name}'")
-
-        except Exception as e:
-            print(f"Error creating table: {e}")
-
-    def do_use(self, arg: str) -> None:
-        """
-        USE <database> - Open existing database
-
-        Example:
-          USE mydb
-        """
-        if not arg:
-            print("Syntax: USE <database>")
-            return
-
-        db_name = arg.strip()
+    def _use_database(self, db_name):
+        """Switch to a database"""
         if not db_name.endswith('.db'):
             db_name += '.db'
+            
+        path = os.path.join(os.getcwd(), db_name)
+        if not os.path.exists(path):
+            print(f"Database not found: {db_name}")
+            return
 
         try:
-            if not Path(db_name).exists():
-                print(f"Database '{db_name}' not found")
-                return
-
-            # Open database
-            self.file_manager = FileManager(db_name)
-            self.catalog = Catalog(self.file_manager)
-            self.current_db = db_name
-
-            print(f"Using database '{db_name}'")
-            print(f"Tables: {len(self.catalog.list_tables())}")
-
+            fm = FileManager(path)
+            catalog = Catalog(fm)
+            self.engine = QueryEngine(fm, catalog)
+            self.db_path = path
+            self.prompt = f"pesasql({db_name})> "
+            print(f"Using database: {db_name}")
+            
+            # Load catalog
+            print(f"Loaded {len(catalog.tables)} tables from catalog")
         except Exception as e:
-            print(f"Error opening database: {e}")
+            print(f"Error loading database: {e}")
 
-    def do_show(self, arg: str) -> None:
-        """
-        SHOW TABLES - List all tables
-        SHOW DATABASES - List all databases in current directory
-        """
-        arg = arg.upper()
-
-        if arg == "TABLES":
-            self._show_tables()
-        elif arg == "DATABASES":
-            self._show_databases()
-        else:
-            print("Syntax: SHOW TABLES")
-            print("        SHOW DATABASES")
-
-    def _show_tables(self) -> None:
-        """List all tables in current database"""
-        if not self.catalog:
+    def do_describe(self, table_name):
+        """Describe a table schema"""
+        if not self.engine:
             print("No database selected")
             return
 
-        tables = self.catalog.list_tables()
+        schema = self.engine.catalog.get_table(table_name)
+        if not schema:
+            print(f"Table '{table_name}' not found")
+            return
+
+        print(f"\nTable: {schema.name}")
+        print("-" * 40)
+        print(f"{'Column':<20} | {'Type':<15}")
+        print("-" * 40)
+        
+        for col in schema.columns:
+            type_str = col.data_type.name
+            if col.length > 0:
+                type_str += f"({col.length})"
+            print(f"{col.name:<20} | {type_str:<15}")
+        print()
+
+    def _show_tables(self):
+        """Show all tables"""
+        if not self.engine:
+            print("No database selected")
+            return
+
+        tables = list(self.engine.catalog.tables.keys())
         if not tables:
-            print("No tables in database")
+            print("No tables found")
             return
 
         print("\nTables in database:")
-        print("-" * 40)
-        for i, table in enumerate(tables, 1):
-            print(f"{i:3}. {table}")
-        print("-" * 40)
-        print(f"Total: {len(tables)} table(s)")
+        print("-" * 20)
+        for table in tables:
+            print(table)
+        print()
 
-    def _show_databases(self) -> None:
-        """List all .db files in current directory"""
-        db_files = list(Path('.').glob('*.db'))
-
-        if not db_files:
-            print("No databases found in current directory")
-            return
-
-        print("\nDatabases in current directory:")
-        print("-" * 40)
-        for i, db_file in enumerate(db_files, 1):
-            size_kb = db_file.stat().st_size / 1024
-            current = " (current)" if str(db_file) == self.current_db else ""
-            print(f"{i:3}. {db_file.name} ({size_kb:.1f} KB){current}")
-        print("-" * 40)
-
-    def do_describe(self, arg: str) -> None:
+    def default(self, line: str) -> None:
         """
-        DESCRIBE <table> - Show table structure
-
-        Example:
-          DESCRIBE users
+        Handle SQL commands
         """
-        if not arg:
-            print("Syntax: DESCRIBE <table>")
+        # Handle special SQL commands that affect CLI state but are parsed by Engine
+        # We need a temporary engine to parse commands even if no DB is selected?
+        # Actually, Parser is static. CLI should probably use Parser directly for these?
+        # But for now, we rely on engine. 
+        # CAUTION: If self.engine is None, we can't call execute_sql.
+        
+        # We need to handle CREATE DATABASE / USE manually if no engine?
+        # Or create a dummy engine?
+        # Better: Check for CREATE DATABASE / USE simply here, or use Parser directly.
+        
+        lower_line = line.strip().lower()
+        if lower_line.startswith('create database'):
+            parts = line.strip().split()
+            if len(parts) >= 3:
+                self._create_database(parts[2])
+            return
+        elif lower_line.startswith('use'):
+            parts = line.strip().split()
+            if len(parts) >= 2:
+                self._use_database(parts[1])
             return
 
-        if not self.catalog:
-            print("No database selected")
+        if not self.engine:
+            print("No database selected. Use CREATE DATABASE or USE first")
             return
 
-        table_name = arg.strip()
-        description = self.catalog.describe_table(table_name)
+        try:
+            result = self.engine.execute_sql(line)
+            
+            # Handle commands delegated back from engine (e.g. parsed but not executed)
+            if isinstance(result, dict) and 'command' in result:
+                cmd = result['command']
+                if cmd == 'CREATE_DATABASE':
+                    self._create_database(result['db_name'])
+                elif cmd == 'USE':
+                    self._use_database(result['db_name'])
+                elif cmd == 'DESCRIBE':
+                    self.do_describe(result['table_name'])
+                elif cmd == 'SHOW_TABLES':
+                    self._show_tables()
+                elif cmd == 'SHOW_DATABASES':
+                    # Not implemented yet
+                    print("SHOW DATABASES not implemented")
+            else:
+                self._display_result(result)
+                
+        except PesaSQLParseError as e:
+            print(f"Parse error: {e}")
+        except PesaSQLExecutionError as e:
+            print(f"Execution error: {e}")
+        except Exception as e:
+            print(f"Error: {e}")
 
-        if description:
-            print(f"\n{description}")
+    def _display_result(self, result: dict) -> None:
+        """Display query result"""
+        if result.get('plan_type') == 'SELECT':
+            self._display_select_result(result)
+        elif 'rows_inserted' in result:
+            print(f"Inserted {result['rows_inserted']} row(s)")
+        elif result.get('status') == 'created':
+             print(f"Table '{result.get('table_name')}' created")
+        elif result.get('status') == 'dropped':
+             print(f"Table '{result.get('table_name')}' dropped")
         else:
-            print(f"Table '{table_name}' not found")
+            print(f"Result: {result}")
 
-    def do_drop(self, arg: str) -> None:
-        """
-        DROP TABLE <name> - Remove table from database
+    def _display_select_result(self, result: dict) -> None:
+        """Display SELECT query result in table format"""
+        columns = result['columns']
+        data = result['data']
 
-        Example:
-          DROP TABLE users
-        """
-        args = shlex.split(arg)
-
-        if len(args) < 2:
-            print("Syntax: DROP TABLE <name>")
+        if not data:
+            print("Empty result set")
             return
 
-        command = args[0].upper()
+        # Calculate column widths
+        col_widths = []
+        for i, col in enumerate(columns):
+            max_len = len(str(col))
+            for row in data:
+                max_len = max(max_len, len(str(row[i])))
+            col_widths.append(min(max_len, 50))  # Cap at 50 chars
 
-        if command == "TABLE":
-            table_name = args[1]
-            self._drop_table(table_name)
-        else:
-            print(f"Unknown DROP command: {command}")
+        # Print header
+        header = " | ".join(f"{col:<{width}}" for col, width in zip(columns, col_widths))
+        separator = "-+-".join("-" * width for width in col_widths)
 
-    def _drop_table(self, table_name: str) -> None:
-        """Drop table from database"""
-        if not self.catalog:
-            print("No database selected")
-            return
+        print(header)
+        print(separator)
 
-        # Confirm
-        confirm = input(f"Are you sure you want to drop table '{table_name}'? (yes/no): ")
-        if confirm.lower() != 'yes':
-            print("Drop cancelled")
-            return
+        # Print rows
+        for row in data:
+            row_str = " | ".join(f"{str(val):<{width}}" for val, width in zip(row, col_widths))
+            print(row_str)
 
-        if self.catalog.drop_table(table_name):
-            print(f"Table '{table_name}' dropped")
-        else:
-            print(f"Failed to drop table '{table_name}'")
-
-    def do_info(self, arg: str) -> None:
-        """
-        INFO - Show database information
-        INFO CATALOG - Show catalog information
-        INFO BUFFER - Show buffer pool statistics
-        """
-        if not self.file_manager:
-            print("No database selected")
-            return
-
-        arg = arg.upper() if arg else ""
-
-        if arg == "CATALOG":
-            self._show_catalog_info()
-        elif arg == "BUFFER" or arg == "BUFFERPOOL":
-            self._show_buffer_info()
-        else:
-            self._show_database_info()
-
-    def _show_database_info(self) -> None:
-        """Show database information"""
-        info = self.file_manager.get_database_info()
-
-        print("\nDatabase Information:")
-        print("-" * 50)
-        print(f"File: {self.current_db}")
-        print(f"Size: {info['file_size'] / 1024:.1f} KB")
-        print(f"Page Size: {info['page_size']} bytes")
-        print(f"Total Pages: {info['total_pages']}")
-        print(f"Free List Head: {info['free_list_head']}")
-        print(f"WAL Size: {info['wal_size']} bytes")
-        print(f"Magic: {info['magic_string']}")
-        print("-" * 50)
-
-    def _show_catalog_info(self) -> None:
-        """Show catalog information"""
-        if not self.catalog:
-            print("No catalog loaded")
-            return
-
-        info = self.catalog.get_catalog_info()
-
-        print("\nCatalog Information:")
-        print("-" * 50)
-        print(f"Tables: {info['table_count']}")
-        print(f"Catalog Pages: {info['catalog_pages']}")
-        print(f"Memory Usage: {info['memory_size']} bytes")
-        print("\nTable List:")
-        for i, table in enumerate(info['tables'], 1):
-            print(f"  {i:2}. {table}")
-        print("-" * 50)
-
-    def _show_buffer_info(self) -> None:
-        """Show buffer pool information"""
-        stats = self.buffer_pool.get_stats()
-
-        print("\nBuffer Pool Information:")
-        print("-" * 50)
-        print(f"Capacity: {stats['capacity']} pages")
-        print(f"Current Size: {stats['current_size']} pages")
-        print(f"Hits: {stats['hits']}")
-        print(f"Misses: {stats['misses']}")
-        print(f"Hit Ratio: {stats['hit_ratio']}")
-        print(f"Evictions: {stats['evictions']}")
-        print(f"Pinned Pages: {stats['pinned_pages']}")
-        print("-" * 50)
-
-    def do_insert(self, arg: str) -> None:
-        """
-        INSERT INTO <table> VALUES (val1, val2, ...) - Insert data
-
-        Example:
-          INSERT INTO users VALUES (1, 'John', 100.50)
-
-        Note: Basic placeholder for Week 2
-        """
-        print("INSERT command placeholder - To be implemented in Week 3")
-        print("This will insert data into the specified table")
-
-    def do_select(self, arg: str) -> None:
-        """
-        SELECT * FROM <table> - Query data
-
-        Example:
-          SELECT * FROM users
-
-        Note: Basic placeholder for Week 2
-        """
-        print("SELECT command placeholder - To be implemented in Week 3")
-        print("This will query data from the specified table")
-
-    def do_quit(self, arg: str) -> None:
-        """QUIT - Exit PesaSQL"""
-        print("\nThank you for using PesaSQL!")
-        if self.buffer_pool and self.file_manager:
-            self.buffer_pool.clear(self.file_manager)
-        return True
-
-    def do_exit(self, arg: str) -> None:
-        """EXIT - Exit PesaSQL"""
-        return self.do_quit(arg)
-
-    def do_help(self, arg: str) -> None:
-        """HELP - Show available commands"""
-        commands = {
-            "CREATE": "Create database or table",
-            "USE": "Open existing database",
-            "SHOW": "Show tables or databases",
-            "DESCRIBE": "Show table structure",
-            "DROP": "Drop table",
-            "INFO": "Show database/catalog/buffer information",
-            "INSERT": "Insert data into table (Week 3)",
-            "SELECT": "Query data from table (Week 3)",
-            "QUIT/EXIT": "Exit PesaSQL",
-            "HELP": "Show this help"
-        }
-
-        print("\nAvailable Commands:")
-        print("-" * 60)
-        for cmd, desc in commands.items():
-            print(f"{cmd:15} - {desc}")
-        print("\nExamples:")
-        print("  CREATE DATABASE mydb")
-        print("  USE mydb")
-        print("  CREATE TABLE users (id INT PRIMARY KEY, name STRING(100))")
-        print("  SHOW TABLES")
-        print("  DESCRIBE users")
-        print("-" * 60)
-
-    # Aliases
-    do_q = do_quit
-    do_EOF = do_quit  # Ctrl-D support
+        print(f"\n{len(data)} row(s) returned")
 
 
 def main():
-    """Main entry point for PesaSQL REPL"""
-    print(PesaSQLREPL.intro)
-
-    # Check for command line arguments
-    if len(sys.argv) > 1:
-        # Non-interactive mode (future)
-        print(f"Command line mode not yet implemented")
-        return
-
-    # Start interactive REPL
     repl = PesaSQLREPL()
-    repl.cmdloop()
-
+    try:
+        repl.cmdloop()
+    except KeyboardInterrupt:
+        print("\nExiting...")
 
 if __name__ == "__main__":
     main()
