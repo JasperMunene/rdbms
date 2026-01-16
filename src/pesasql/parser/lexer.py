@@ -18,6 +18,13 @@ class TokenType:
     DELETE = 'DELETE'
     FROM = 'FROM'
     WHERE = 'WHERE'
+    JOIN = 'JOIN'
+    ON = 'ON'
+    INNER = 'INNER'
+    LEFT = 'LEFT'
+    RIGHT = 'RIGHT'
+    FULL = 'FULL'
+    OUTER = 'OUTER'
     CREATE = 'CREATE'
     TABLE = 'TABLE'
     DROP = 'DROP'
@@ -125,6 +132,13 @@ class Lexer:
         (r'(?i)DELETE\b', TokenType.DELETE),
         (r'(?i)FROM\b', TokenType.FROM),
         (r'(?i)WHERE\b', TokenType.WHERE),
+        (r'(?i)JOIN\b', TokenType.JOIN),
+        (r'(?i)ON\b', TokenType.ON),
+        (r'(?i)INNER\b', TokenType.INNER),
+        (r'(?i)LEFT\b', TokenType.LEFT),
+        (r'(?i)RIGHT\b', TokenType.RIGHT),
+        (r'(?i)FULL\b', TokenType.FULL),
+        (r'(?i)OUTER\b', TokenType.OUTER),
         (r'(?i)CREATE\b', TokenType.CREATE),
         (r'(?i)TABLE\b', TokenType.TABLE),
         (r'(?i)DROP\b', TokenType.DROP),

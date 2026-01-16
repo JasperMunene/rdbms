@@ -47,7 +47,7 @@ def test_file_manager_create(db_path):
     fm.create_database()
     
     assert db_path.exists()
-    assert db_path.stat().st_size >= PAGE_SIZE * 2 # Header + Catalog
+    assert db_path.stat().st_size >= PAGE_SIZE * 3 # Header + Catalog + IndexCatalog
     
     header = fm.read_page(0)
     assert header.page_type == PageType.HEADER
@@ -55,14 +55,14 @@ def test_file_manager_create(db_path):
     # Read database magic string from info
     info = fm.get_database_info()
     assert info["magic_string"] == PESA_MAGIC
-    assert info["total_pages"] == 2
+    assert info["total_pages"] == 3
 
 def test_file_manager_allocation(file_manager):
-    # Initial state: 2 pages (0, 1)
+    # Initial state: 3 pages (0, 1, 2)
     
     # Allocate new page
     p2 = file_manager.allocate_page()
-    assert p2.page_id == 2
+    assert p2.page_id == 3
     
     # Write some data
     p2.write_int(100, 999)
@@ -71,19 +71,19 @@ def test_file_manager_allocation(file_manager):
     file_manager.write_page(p2)
     
     # Read back
-    p2_read = file_manager.read_page(2)
+    p2_read = file_manager.read_page(3)
     assert p2_read.read_int(100) == 999
     
     # Allocate another
     p3 = file_manager.allocate_page()
-    assert p3.page_id == 3
+    assert p3.page_id == 4
     
     # Deallocate p2 - New API takes page_id int
     file_manager.deallocate_page(p2.page_id)
     
     # Reallocate - should get p2 back (freelist)
     p_new = file_manager.allocate_page()
-    assert p_new.page_id == 2
+    assert p_new.page_id == 3
     
 def test_buffer_pool(file_manager):
     bp = BufferPool(capacity=2)

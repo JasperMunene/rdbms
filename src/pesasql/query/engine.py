@@ -7,6 +7,7 @@ from ..parser.parser import Parser
 from ..parser.exceptions import PesaSQLParseError, PesaSQLSyntaxError
 from ..catalog.catalog import Catalog
 from ..storage.file_manager import FileManager
+from ..storage.index.index_manager import IndexManager
 from .planner import Planner
 from .executor import Executor, Row
 from .exceptions import PesaSQLExecutionError
@@ -18,8 +19,9 @@ class QueryEngine:
     def __init__(self, file_manager: FileManager, catalog: Catalog):
         self.file_manager = file_manager
         self.catalog = catalog
-        self.planner = Planner(catalog)
-        self.executor = Executor(file_manager, catalog)
+        self.index_manager = IndexManager(file_manager)
+        self.planner = Planner(catalog, self.index_manager)
+        self.executor = Executor(file_manager, catalog, self.index_manager)
 
     def execute_sql(self, sql: str) -> Any:
         """

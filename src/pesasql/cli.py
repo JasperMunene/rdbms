@@ -19,7 +19,7 @@ class PesaSQLREPL(cmd.Cmd):
     intro = """
     ╔══════════════════════════════════════╗
     ║      PesaSQL Database System         ║
-    ║      Version 0.3 - Week 3            ║
+    ║      Version 0.3 -  Day 3            ║
     ║      SQL Parser & Query Engine       ║
     ║      Type 'help' for commands        ║
     ╚══════════════════════════════════════╝
@@ -129,6 +129,49 @@ class PesaSQLREPL(cmd.Cmd):
             print(table)
         print()
 
+    def do_create_index(self, arg):
+        """Create an index: create_index table_name column_name [unique]"""
+        if not self.engine:
+            print("No database selected")
+            return
+            
+        args = arg.split()
+        if len(args) < 2:
+            print("Usage: create_index <table_name> <column_name> [unique]")
+            return
+            
+        table_name = args[0]
+        column_name = args[1]
+        is_unique = False
+        if len(args) > 2 and args[2].lower() == 'unique':
+            is_unique = True
+            
+        success = self.engine.index_manager.create_index(table_name, column_name, False, is_unique)
+        if success:
+            print(f"Index created on {table_name}.{column_name}")
+        else:
+            print(f"Failed to create index on {table_name}.{column_name}")
+
+    def do_drop_index(self, arg):
+        """Drop an index: drop_index table_name column_name"""
+        if not self.engine:
+            print("No database selected")
+            return
+            
+        args = arg.split()
+        if len(args) < 2:
+            print("Usage: drop_index <table_name> <column_name>")
+            return
+            
+        table_name = args[0]
+        column_name = args[1]
+        
+        success = self.engine.index_manager.drop_index(table_name, column_name)
+        if success:
+            print(f"Index dropped on {table_name}.{column_name}")
+        else:
+            print(f"Failed to drop index on {table_name}.{column_name}")
+
     def default(self, line: str) -> None:
         """
         Handle SQL commands
@@ -154,6 +197,34 @@ class PesaSQLREPL(cmd.Cmd):
             if len(parts) >= 2:
                 self._use_database(parts[1])
             return
+        elif lower_line.startswith('create index'):
+            # Simple CLI processing for CREATE INDEX
+            # Format: CREATE INDEX index_name ON table (column)
+            # OR simplified: create index table column [unique]
+            try:
+                parts = line.split()
+                # Parse simplified syntax matching do_create_index
+                if len(parts) >= 4 and parts[2].lower() == 'on':
+                    # Standard SQL-ish: CREATE INDEX name ON table (col)
+                    # Not fully parsing here, just basic extraction
+                    pass 
+                else:
+                    # Try simplified: CREATE INDEX table column [UNIQUE]
+                    args = " ".join(parts[2:])
+                    self.do_create_index(args)
+                    return
+            except:
+                pass
+        elif lower_line.startswith('drop index'):
+             try:
+                 parts = line.split()
+                 if len(parts) >= 4:
+                     # DROP INDEX users city
+                     args = " ".join(parts[2:])
+                     self.do_drop_index(args)
+                     return
+             except:
+                 pass
 
         if not self.engine:
             print("No database selected. Use CREATE DATABASE or USE first")

@@ -6,6 +6,7 @@ from typing import List, Dict, Any
 from ..parser.ast import *
 from ..catalog.schema import TableSchema, Column as SchemaColumn
 from ..catalog.catalog import Catalog
+from ..storage.index.index_manager import IndexManager
 from ..types.value import Value, Type
 from .exceptions import PesaSQLExecutionError
 
@@ -24,8 +25,9 @@ class QueryPlan:
 class Planner:
     """Creates execution plans from AST"""
 
-    def __init__(self, catalog: Catalog):
+    def __init__(self, catalog: Catalog, index_manager: IndexManager = None):
         self.catalog = catalog
+        self.index_manager = index_manager
 
     def plan(self, ast: Node) -> QueryPlan:
         """Create execution plan from AST"""
@@ -54,9 +56,20 @@ class Planner:
         column_names = []
 
         if stmt.columns and stmt.columns[0].name == '*':
-            # Select all columns
+            # Select all columns (including joins)
             column_indices = list(range(len(table_schema.columns)))
             column_names = [col.name for col in table_schema.columns]
+            
+            # Add columns from joined tables
+            current_offset = len(table_schema.columns)
+            if stmt.joins:
+                for join in stmt.joins:
+                    join_schema = self.catalog.get_table(join.table_name)
+                    if join_schema:
+                        indices = list(range(current_offset, current_offset + len(join_schema.columns)))
+                        column_indices.extend(indices)
+                        column_names.extend([f"{join.table_name}.{col.name}" for col in join_schema.columns])
+                        current_offset += len(join_schema.columns)
         else:
             # Select specific columns
             for col in stmt.columns:
@@ -75,6 +88,53 @@ class Planner:
         if stmt.where_clause:
             filter_conditions = self._extract_conditions(stmt.where_clause, table_schema)
 
+        # Check for Index Scan opportunity
+        access_method = 'SEQ_SCAN'
+        index_name = None
+        index_conditions = []
+
+        if self.index_manager and filter_conditions:
+            for condition in filter_conditions:
+                column_name = condition['column_name']
+                operator = condition['operator']
+                
+                # Check directly if index exists for this column
+                # Note: condition must be index-compatible (e.g. =, <, >, <=, >=)
+                # AND it must not be negated (simple check)
+                
+                # Supported index operators
+                if operator in ('=', '<', '>', '<=', '>='):
+                     if self.index_manager.has_index(table_schema.name, column_name):
+                         access_method = 'INDEX_SCAN'
+                         # We use the index name from manager convention: "table.col"
+                         index_name = f"{table_schema.name}.{column_name}"
+                         # We'll rely on all conditions being checked, but the index scan 
+                         # will efficiently filter by this specific condition first.
+                         # In a real planner we'd separate index keys from residual predicates.
+                         # For now, we pass all conditions to executor, but mark the index to use.
+                         # IMPORTANT: We only pick ONE index.
+                         break
+
+        # Process Joins
+        planned_joins = []
+        if stmt.joins:
+            for join in stmt.joins:
+                join_table_schema = self.catalog.get_table(join.table_name)
+                if not join_table_schema:
+                    raise PesaSQLExecutionError(f"Table '{join.table_name}' not found")
+                
+                # Check for index on join condition for the inner table?
+                # Simplified: Assume Inner Loop is SEQ_SCAN for now unless we do sophisticated planning.
+                # Ideally we check index on join column in T2.
+                # For now, just pass the info.
+                
+                planned_joins.append({
+                    'table_name': join.table_name,
+                    'join_type': join.join_type.value,
+                    'on_condition': self._extract_condition(join.on_condition), # Transform expression to dict
+                    'table_schema': join_table_schema
+                })
+
         return QueryPlan('SELECT', {
             'table_name': stmt.table_name,
             'table_schema': table_schema,
@@ -83,8 +143,31 @@ class Planner:
             'filter_conditions': filter_conditions,
             'limit': stmt.limit,
             'offset': stmt.offset,
-            'order_by': stmt.order_by
+            'order_by': stmt.order_by,
+            'access_method': access_method,
+            'index_name': index_name,
+            'joins': planned_joins
         })
+
+    def _extract_condition(self, expr: Expression) -> Dict[str, Any]:
+        """Extract simple condition from expression (Helper for Joins)"""
+        # Simplified: assumes BinaryExpression(Column, Op, Column/Literal)
+        if isinstance(expr, BinaryExpression):
+            return {
+                'left': self._extract_operand(expr.left),
+                'operator': expr.operator,
+                'right': self._extract_operand(expr.right)
+            }
+        return {'raw': str(expr)} # Fallback
+
+    def _extract_operand(self, expr: Expression) -> Dict[str, Any]:
+        """Extract operand info"""
+        if isinstance(expr, ColumnExpression):
+            return {'type': 'column', 'name': expr.column.name, 'table': expr.column.table_alias}
+        elif isinstance(expr, LiteralExpression):
+            return {'type': 'literal', 'value': expr.literal.to_value(), 'data_type': expr.literal.value_type}
+        return {'type': 'unknown'}
+
 
     def plan_insert(self, stmt: InsertStatement) -> QueryPlan:
         """Plan INSERT query"""

@@ -185,6 +185,13 @@ class TableSchema:
                 return col
         return None
 
+    def get_column_index(self, name: str) -> int:
+        """Get column index by name"""
+        for i, col in enumerate(self.columns):
+            if col.name == name:
+                return i
+        return -1
+
     def get_primary_key_column(self) -> Optional[Column]:
         """Get primary key column"""
         if self.primary_key:

@@ -8,6 +8,12 @@ from enum import Enum
 from ..types.value import Value, Type
 
 
+@dataclass
+class Node:
+    """Base AST node"""
+    pass
+
+
 class JoinType(Enum):
     """Types of JOINs (for future use)"""
     INNER = "INNER"
@@ -17,9 +23,11 @@ class JoinType(Enum):
 
 
 @dataclass
-class Node:
-    """Base AST node"""
-    pass
+class JoinClause(Node):
+    """JOIN clause"""
+    table_name: str
+    join_type: JoinType
+    on_condition: 'Expression'
 
 
 @dataclass
@@ -31,6 +39,9 @@ class SelectStatement(Node):
     limit: Optional[int] = None
     offset: Optional[int] = None
     order_by: List['OrderByClause'] = field(default_factory=list)
+
+    joins: List[JoinClause] = field(default_factory=list)
+
 
 
 @dataclass

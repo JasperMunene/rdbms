@@ -47,6 +47,12 @@ class FileManager:
             catalog = self._create_catalog_page()
             f.write(catalog.data)
 
+            # Create index catalog page (page 2)
+            index_catalog = Page(2, PageType.CATALOG)
+            index_catalog.write_int(PAGE_HEADER_SIZE, 0) # 0 indexes
+            index_catalog.update_checksum()
+            f.write(index_catalog.data)
+
         # Initialize empty WAL
         self.wal_path.write_bytes(b'')
 
@@ -65,8 +71,8 @@ class FileManager:
         # Schema version
         header.write_int(DB_VERSION_OFFSET, 1)
 
-        # Initial page count (header + catalog)
-        header.write_int(DB_PAGE_COUNT_OFFSET, 2)
+        # Initial page count (header + catalog + index catalog)
+        header.write_int(DB_PAGE_COUNT_OFFSET, 3)
 
         # Free list head (0 means empty)
         header.write_int(DB_FREE_LIST_HEAD_OFFSET, 0)

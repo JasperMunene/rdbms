@@ -52,6 +52,10 @@ class Parser:
         # FROM clause
         self._consume(TokenType.FROM, "Expected FROM after columns")
         table_name = self._consume(TokenType.IDENTIFIER, "Expected table name").value
+        
+        # JOIN clauses
+        joins = self.parse_join_clauses()
+
 
         # WHERE clause (optional)
         where_clause = None
@@ -82,8 +86,46 @@ class Parser:
             where_clause=where_clause,
             limit=limit,
             offset=offset,
-            order_by=order_by
+            order_by=order_by,
+            joins=joins
         )
+
+    def parse_join_clauses(self) -> List[JoinClause]:
+        """Parse JOIN clauses"""
+        joins = []
+        
+        while True:
+            join_type = None
+            if self._match(TokenType.JOIN):
+                join_type = JoinType.INNER
+            elif self._match(TokenType.INNER):
+                self._consume(TokenType.JOIN, "Expected JOIN after INNER")
+                join_type = JoinType.INNER
+            elif self._match(TokenType.LEFT):
+                self._match(TokenType.OUTER) # Optional OUTER
+                self._consume(TokenType.JOIN, "Expected JOIN after LEFT")
+                join_type = JoinType.LEFT
+            elif self._match(TokenType.RIGHT):
+                self._match(TokenType.OUTER) # Optional OUTER
+                self._consume(TokenType.JOIN, "Expected JOIN after RIGHT")
+                join_type = JoinType.RIGHT
+            elif self._match(TokenType.FULL):
+                self._match(TokenType.OUTER) # Optional OUTER
+                self._consume(TokenType.JOIN, "Expected JOIN after FULL")
+                join_type = JoinType.FULL
+                
+            if not join_type:
+                break
+                
+            table_name = self._consume(TokenType.IDENTIFIER, "Expected table name").value
+            
+            self._consume(TokenType.ON, "Expected ON after table name")
+            on_condition = self.parse_expression()
+            
+            joins.append(JoinClause(table_name, join_type, on_condition))
+            
+        return joins
+
 
     def parse_column_list(self) -> List[Column]:
         """Parse list of columns"""
