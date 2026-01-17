@@ -105,6 +105,8 @@ class Executor:
             return self.execute_create_table(plan)
         elif plan_type == 'DROP_TABLE':
             return self.execute_drop_table(plan)
+        elif plan_type == 'DELETE':
+            return self.execute_delete(plan)
         else:
             # Handle simple commands
             return {'status': 'executed', 'plan': plan_type}
@@ -113,11 +115,12 @@ class Executor:
         """Execute CREATE TABLE"""
         table_name = plan['table_name']
         columns = plan['columns']  # SchemaColumn objects
+        foreign_keys = plan.get('foreign_keys', []) # SchemaForeignKey objects
         
         # Create table in catalog
-        # Create table in catalog
         if self.catalog:
-            schema = TableSchema(table_name, columns)
+            # Pass Foreign Keys
+            schema = TableSchema(table_name, columns, foreign_keys=foreign_keys) 
             if not self.catalog.create_table(schema):
                 raise PesaSQLExecutionError(f"Failed to create table '{table_name}' (Catalog error)")
             
@@ -140,7 +143,8 @@ class Executor:
         return {
             'table_name': table_name,
             'status': 'created',
-            'columns': len(columns)
+            'columns': len(columns),
+            'foreign_keys': len(foreign_keys)
         }
 
     def execute_drop_table(self, plan: Dict[str, Any]) -> Dict[str, Any]:
@@ -158,10 +162,79 @@ class Executor:
             'table_name': table_name,
             'status': 'dropped'
         }
-    def execute_select(self, plan: Dict[str, Any]) -> List[Row]:
-        """Execute SELECT query"""
+
+    def execute_delete(self, plan: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute DELETE query"""
+        from ..storage.page import Page
+        from ..constants import PAGE_HEADER_SIZE
+        
         table_name = plan['table_name']
         table_schema = plan['table_schema']
+        filter_conditions = plan.get('filter_conditions', [])
+        
+        # Find table pages
+        # Delete supports simple Table Scan only for identifying rows to delete
+        data_pages = self._find_table_pages(table_name)
+        
+        rows_deleted = 0
+        
+        for page_id in data_pages:
+            page = self.file_manager.read_page(page_id)
+            rows = self._extract_rows_from_page(page, table_schema)
+            
+            kept_rows = []
+            page_modified = False
+            
+            for row in rows:
+                if self._row_matches_conditions(row, filter_conditions):
+                    rows_deleted += 1
+                    page_modified = True
+                    # If we had IndexManager.delete, call it here.
+                else:
+                    kept_rows.append(row)
+            
+            if page_modified:
+                # Rewrite Page: Reset free space to header end (+ table name)
+                header_end_offset = 13 + 64
+                page.write_short(9, header_end_offset) # PAGE_FREE_START_OFFSET
+                
+                # Write back kept rows
+                cursor = header_end_offset
+                
+                for row in kept_rows:
+                    row_data = row.serialize()
+                    row_len = len(row_data)
+                    
+                    # Length prefix
+                    page.write_int(cursor, row_len)
+                    cursor += 4
+                    
+                    # Data
+                    page.write_bytes(cursor, row_data)
+                    cursor += row_len
+                
+                # Update free start
+                page.write_short(9, cursor)
+                page.is_dirty = True
+                self.file_manager.write_page_with_wal(page)
+
+        return {
+            'table_name': table_name,
+            'rows_deleted': rows_deleted
+        }
+
+    def execute_select(self, plan: Dict[str, Any]) -> List[Row]:
+        """Execute SELECT query"""
+        import copy
+        table_name = plan['table_name']
+        table_schema = plan['table_schema']
+        
+        # Handle primary table alias
+        alias = plan.get('alias')
+        if alias:
+            table_schema = copy.copy(table_schema)
+            table_schema.name = alias
+            
         column_indices = plan['column_indices']
         filter_conditions = plan.get('filter_conditions', [])
         limit = plan.get('limit')
@@ -219,6 +292,8 @@ class Executor:
 
     def execute_insert(self, plan: Dict[str, Any]) -> Dict[str, Any]:
         """Execute INSERT query"""
+        from ..catalog.schema import ColumnConstraint
+        
         table_name = plan['table_name']
         table_schema = plan['table_schema']
         column_indices = plan['column_indices']
@@ -227,39 +302,54 @@ class Executor:
         rows_inserted = 0
 
         # Evaluate value expressions
-        from ..parser.parser import Parser
-        from ..types.value import Value, Type
-
         for value_list in values_ast:
-            # Create full row with NULLs
-            row_values = [Value(Type.NULL, None) for _ in range(len(table_schema.columns))]
-
-            # Fill in provided values
+            # We must build values for ALL columns in schema order
+            row_values = []
+            
+            # Map of column index -> provided value
+            # Since value_list corresponds to column_indices (already vetted by Planner),
+            # we can iterate schema columns and pick either from provided, or default.
+            
+            # First, evaluate the provided values
+            provided_values_map = {}
             for i, col_idx in enumerate(column_indices):
                 expr = value_list[i]
-
-                # Evaluate expression (simplified - should use expression evaluator)
+                
+                # Evaluate expression (simplified)
                 if hasattr(expr, 'literal'):
                     value = expr.literal.to_value()
                 else:
-                    # For now, only support literals
                     raise PesaSQLExecutionError("Only literal values supported in INSERT")
-
-                # Type checking
-                expected_type = table_schema.columns[col_idx].data_type
-                if value.type.value != expected_type.value:
-                    # Try to convert
-                    try:
-                        # Convert DataType to Type enum
-                        target_type = Type(expected_type.value)
-                        value = Value(target_type, value.value)
-                    except ValueError:
-                        raise PesaSQLExecutionError(
-                            f"Type mismatch for column '{table_schema.columns[col_idx].name}': "
-                            f"expected {expected_type.name}, got {value.type.name}"
-                        )
-
-                row_values[col_idx] = value
+                
+                provided_values_map[col_idx] = value
+                
+            # Construct row values
+            for i, col in enumerate(table_schema.columns):
+                if i in provided_values_map:
+                    val = provided_values_map[i]
+                    # Type Check
+                    if val.type.value != col.data_type.value and val.type != Type.NULL:
+                         # Try simple coercion
+                         try:
+                             target_type = Type(col.data_type.value)
+                             val = Value(target_type, val.value)
+                         except:
+                             raise PesaSQLExecutionError(f"Type mismatch for col {col.name}")
+                    
+                    row_values.append(val)
+                else:
+                    # Use Default or NULL
+                    if col.default_value is not None:
+                        # Convert python default to Value
+                        # default_value is already python type from Schema
+                        # We need to wrap in Value
+                        val_type = Type(col.data_type.value)
+                        row_values.append(Value(val_type, col.default_value))
+                    else:
+                        # Check NOT NULL
+                        if ColumnConstraint.NOT_NULL in col.constraints:
+                             raise PesaSQLExecutionError(f"Column '{col.name}' cannot be NULL")
+                        row_values.append(Value(Type.NULL, None))
 
             # Create row
             row = Row(row_values)
@@ -307,7 +397,6 @@ class Executor:
         """Extract rows from a data page (Length-Prefixed Scan)"""
         rows = []
 
-        free_start = page.read_short(9)  # PAGE_FREE_START_OFFSET
         free_start = page.read_short(9)  # PAGE_FREE_START_OFFSET
         offset = 13 + 64  # PAGE_HEADER_SIZE + Table Name (64 bytes)
         row_id = 0
@@ -408,10 +497,6 @@ class Executor:
 
     def _find_free_page_for_table(self, table_name: str, required_size: int) -> int:
         """Find or allocate a page with free space for the table"""
-        # Scan existing pages? (Inefficient for now)
-        # For Phase 3, we simply allocate new page if strictly needed, 
-        # but let's try to reuse the last page if it has space.
-        
         # Simple optimization: Check last page of table
         table_pages = self._find_table_pages(table_name)
         if table_pages:
@@ -469,12 +554,21 @@ class Executor:
         """Execute joins with support for Hash Join and Outer Joins"""
         from ..constants import JOIN_TYPE_INNER, JOIN_TYPE_LEFT, JOIN_TYPE_RIGHT, JOIN_TYPE_FULL
 
+        import copy # Import copy
+        
         current_rows = outer_rows
         current_schema = outer_schema
         
         for join in joins:
             inner_table_name = join['table_name']
             inner_schema = join['table_schema']
+            alias = join.get('alias')
+            
+            # If alias is provided, create a copy of schema with alias as name
+            if alias:
+                 inner_schema = copy.copy(inner_schema)
+                 inner_schema.name = alias
+            
             condition = join['on_condition']
             join_type_raw = join.get('join_type', JOIN_TYPE_INNER)
             # Handle enum or int
@@ -667,10 +761,14 @@ class Executor:
     def _merge_schemas(self, s1: TableSchema, s2: TableSchema) -> TableSchema:
         """Create a merged schema (temporary for join processing)"""
         # This is strictly for column/index resolution during execution
-        from ..catalog.schema import TableSchema as TS, Column
+        from ..catalog.schema import TableSchema as TS, Column, ColumnConstraint
         
         merged_cols = []
         seen_names = set()
+        
+        def strip_pk(constraints):
+            """Remove PRIMARY_KEY from constraints to avoid composite PK error during merge"""
+            return [c for c in constraints if c != ColumnConstraint.PRIMARY_KEY]
         
         # Add s1 columns
         for col in s1.columns:
@@ -678,7 +776,7 @@ class Executor:
             if new_name in seen_names:
                 new_name = f"{s1.name}.{col.name}" 
             seen_names.add(new_name)
-            merged_cols.append(Column(new_name, col.data_type, col.max_length, col.constraints, col.default_value))
+            merged_cols.append(Column(new_name, col.data_type, col.max_length, strip_pk(col.constraints), col.default_value))
             
         # Add s2 columns
         for col in s2.columns:
@@ -688,6 +786,6 @@ class Executor:
                 if new_name in seen_names:
                      new_name = f"{s2.name}.{col.name}_2"
             seen_names.add(new_name)
-            merged_cols.append(Column(new_name, col.data_type, col.max_length, col.constraints, col.default_value))
+            merged_cols.append(Column(new_name, col.data_type, col.max_length, strip_pk(col.constraints), col.default_value))
 
         return TS(f"{s1.name}_{s2.name}", merged_cols)

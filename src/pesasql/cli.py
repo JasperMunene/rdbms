@@ -19,14 +19,16 @@ class PesaSQLREPL(cmd.Cmd):
     intro = """
     ╔══════════════════════════════════════╗
     ║      PesaSQL Database System         ║
-    ║      Version 0.3 -  Day 3            ║
+    ║      Version 1.0 - Final             ║
     ║      SQL Parser & Query Engine       ║
     ║      Type 'help' for commands        ║
     ╚══════════════════════════════════════╝
     
-    Now with SQL support:
+    Supported SQL:
       SELECT * FROM table [WHERE condition]
       INSERT INTO table VALUES (val1, val2, ...)
+      UPDATE table SET col=val [WHERE condition]
+      DELETE FROM table [WHERE condition]
       CREATE DATABASE name
       USE name
     """

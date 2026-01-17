@@ -52,6 +52,11 @@ class TokenType:
     BOOLEAN = 'BOOLEAN'
     BOOL = 'BOOL'
     TIMESTAMP = 'TIMESTAMP'
+    
+    # Constraints & Default
+    DEFAULT = 'DEFAULT'
+    FOREIGN = 'FOREIGN'
+    REFERENCES = 'REFERENCES'
 
     # Conditionals & Ordering
     IF = 'IF'
@@ -158,6 +163,9 @@ class Lexer:
         (r'(?i)BY\b', TokenType.BY),
         (r'(?i)LIMIT\b', TokenType.LIMIT),
         (r'(?i)OFFSET\b', TokenType.OFFSET),
+        (r'(?i)DEFAULT\b', TokenType.DEFAULT),
+        (r'(?i)FOREIGN\b', TokenType.FOREIGN),
+        (r'(?i)REFERENCES\b', TokenType.REFERENCES),
         (r'(?i)IF\b', TokenType.IF),
         (r'(?i)EXISTS\b', TokenType.EXISTS),
         (r'(?i)ASC\b', TokenType.ASC),

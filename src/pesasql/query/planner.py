@@ -4,7 +4,7 @@ Query Planner - Creates execution plans from AST
 
 from typing import List, Dict, Any
 from ..parser.ast import *
-from ..catalog.schema import TableSchema, Column as SchemaColumn
+from ..catalog.schema import TableSchema, Column as SchemaColumn, ForeignKey as SchemaForeignKey
 from ..catalog.catalog import Catalog
 from ..storage.index.index_manager import IndexManager
 from ..types.value import Value, Type
@@ -39,6 +39,8 @@ class Planner:
             return self.plan_create_table(ast)
         elif isinstance(ast, DropTableStatement):
             return self.plan_drop_table(ast)
+        elif isinstance(ast, DeleteStatement):
+            return self.plan_delete(ast)
         else:
             # Handle simple commands
             command_type = type(ast).__name__
@@ -71,17 +73,49 @@ class Planner:
                         column_names.extend([f"{join.table_name}.{col.name}" for col in join_schema.columns])
                         current_offset += len(join_schema.columns)
         else:
-            # Select specific columns
+            # Select specific columns - need to check joined tables too
+            all_schemas = [table_schema]
+            offsets = [0]
+            current_offset = len(table_schema.columns)
+            
+            # Build list of all schemas with their column offsets
+            if stmt.joins:
+                for join in stmt.joins:
+                    join_schema = self.catalog.get_table(join.table_name)
+                    if join_schema:
+                        all_schemas.append(join_schema)
+                        offsets.append(current_offset)
+                        current_offset += len(join_schema.columns)
+            
             for col in stmt.columns:
                 found = False
-                for i, schema_col in enumerate(table_schema.columns):
-                    if schema_col.name == col.name:
-                        column_indices.append(i)
-                        column_names.append(col.name)
-                        found = True
+                col_name = col.name
+                table_alias = col.table_alias if hasattr(col, 'table_alias') else None
+                
+                # Search through all schemas
+                for schema_idx, schema in enumerate(all_schemas):
+                    # If column has table prefix, match against schema name
+                    if table_alias:
+                        # Check if table_alias matches this schema's name or first letter alias
+                        if table_alias != schema.name and not schema.name.startswith(table_alias):
+                            continue
+                    
+                    for i, schema_col in enumerate(schema.columns):
+                        if schema_col.name == col_name:
+                            absolute_idx = offsets[schema_idx] + i
+                            column_indices.append(absolute_idx)
+                            # Use qualified name if from joined table
+                            if schema_idx > 0:
+                                column_names.append(f"{schema.name}.{col_name}")
+                            else:
+                                column_names.append(col_name)
+                            found = True
+                            break
+                    if found:
                         break
+                        
                 if not found:
-                    raise PesaSQLExecutionError(f"Column '{col.name}' not found in table '{stmt.table_name}'")
+                    raise PesaSQLExecutionError(f"Column '{col.name}' not found in any table")
 
         # Plan WHERE clause
         filter_conditions = []
@@ -130,6 +164,7 @@ class Planner:
                 
                 planned_joins.append({
                     'table_name': join.table_name,
+                    'alias': join.table_alias,
                     'join_type': join.join_type.value,
                     'on_condition': self._extract_condition(join.on_condition), # Transform expression to dict
                     'table_schema': join_table_schema
@@ -137,6 +172,7 @@ class Planner:
 
         return QueryPlan('SELECT', {
             'table_name': stmt.table_name,
+            'alias': stmt.table_alias,
             'table_schema': table_schema,
             'column_indices': column_indices,
             'column_names': column_names,
@@ -209,6 +245,25 @@ class Planner:
             'values_ast': stmt.values  # Will be evaluated during execution
         })
 
+
+    def plan_delete(self, stmt: DeleteStatement) -> QueryPlan:
+        """Plan DELETE query"""
+        # Get table schema
+        table_schema = self.catalog.get_table(stmt.table_name)
+        if not table_schema:
+            raise PesaSQLExecutionError(f"Table '{stmt.table_name}' not found")
+
+        # Plan WHERE clause
+        filter_conditions = []
+        if stmt.where_clause:
+            filter_conditions = self._extract_conditions(stmt.where_clause, table_schema)
+
+        return QueryPlan('DELETE', {
+            'table_name': stmt.table_name,
+            'table_schema': table_schema,
+            'filter_conditions': filter_conditions
+        })
+
     def plan_create_table(self, stmt: CreateTableStatement) -> QueryPlan:
         """Plan CREATE TABLE query"""
         # Check if table exists
@@ -262,12 +317,23 @@ class Planner:
                 name=col_def.name,
                 data_type=data_type,
                 max_length=max_length,
-                constraints=constraints
+                constraints=constraints,
+                default_value=col_def.default_value
+            ))
+            
+        # Parse Foreign Keys
+        foreign_keys = []
+        for fk_def in stmt.foreign_keys:
+            foreign_keys.append(SchemaForeignKey(
+                column_name=fk_def.column_name,
+                ref_table=fk_def.ref_table,
+                ref_column=fk_def.ref_column
             ))
 
         return QueryPlan('CREATE_TABLE', {
             'table_name': stmt.table_name,
             'columns': columns,
+            'foreign_keys': foreign_keys,
             'if_not_exists': stmt.if_not_exists
         })
 

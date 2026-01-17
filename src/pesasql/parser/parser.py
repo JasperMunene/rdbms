@@ -38,6 +38,8 @@ class Parser:
             return self.parse_show()
         elif self._match(TokenType.USE):
             return self.parse_use()
+        elif self._match(TokenType.DELETE):
+            return self.parse_delete()
         else:
             raise PesaSQLSyntaxError(f"Unexpected token: {self.current_token}")
 
@@ -52,6 +54,15 @@ class Parser:
         # FROM clause
         self._consume(TokenType.FROM, "Expected FROM after columns")
         table_name = self._consume(TokenType.IDENTIFIER, "Expected table name").value
+        
+        # Optional table alias (e.g., FROM merchants m)
+        table_alias = None
+        if self.current_token.type == TokenType.IDENTIFIER:
+            # Check if it looks like an alias (not a keyword like JOIN, WHERE, etc.)
+            next_val = self.current_token.value.upper()
+            if next_val not in ('JOIN', 'INNER', 'LEFT', 'RIGHT', 'FULL', 'WHERE', 'ORDER', 'LIMIT', 'OFFSET', 'ON'):
+                table_alias = self.current_token.value
+                self._advance()
         
         # JOIN clauses
         joins = self.parse_join_clauses()
@@ -83,6 +94,7 @@ class Parser:
         return SelectStatement(
             columns=columns,
             table_name=table_name,
+            table_alias=table_alias,
             where_clause=where_clause,
             limit=limit,
             offset=offset,
@@ -119,10 +131,18 @@ class Parser:
                 
             table_name = self._consume(TokenType.IDENTIFIER, "Expected table name").value
             
+            # Optional table alias after join table name (e.g., INNER JOIN users u ON ...)
+            join_table_alias = None
+            if self.current_token.type == TokenType.IDENTIFIER:
+                next_val = self.current_token.value.upper()
+                if next_val != 'ON':
+                    join_table_alias = self.current_token.value
+                    self._advance()
+            
             self._consume(TokenType.ON, "Expected ON after table name")
             on_condition = self.parse_expression()
             
-            joins.append(JoinClause(table_name, join_type, on_condition))
+            joins.append(JoinClause(table_name, join_type, on_condition, join_table_alias))
             
         return joins
 
@@ -216,10 +236,30 @@ class Parser:
 
         self._consume(TokenType.LPAREN, "Expected ( after table name")
 
-        # Parse column definitions
         columns = []
+        foreign_keys = []
+        
+        # Parse definitions (columns or constraints)
         while True:
-            columns.append(self.parse_column_definition())
+            if self._match(TokenType.FOREIGN):
+                # Parse Foreign Key: FOREIGN KEY (col) REFERENCES table(col)
+                self._consume(TokenType.KEY, "Expected KEY after FOREIGN")
+                
+                self._consume(TokenType.LPAREN, "Expected ( after FOREIGN KEY")
+                col_name = self._consume(TokenType.IDENTIFIER, "Expected column name in FK").value
+                self._consume(TokenType.RPAREN, "Expected ) after FK column")
+                
+                self._consume(TokenType.REFERENCES, "Expected REFERENCES in FK")
+                ref_table = self._consume(TokenType.IDENTIFIER, "Expected referenced table").value
+                
+                self._consume(TokenType.LPAREN, "Expected ( after ref table")
+                ref_col = self._consume(TokenType.IDENTIFIER, "Expected referenced column").value
+                self._consume(TokenType.RPAREN, "Expected ) after ref column")
+                
+                foreign_keys.append(ForeignKeyDefinition(col_name, ref_table, ref_col))
+                
+            else:
+                columns.append(self.parse_column_definition())
 
             if not self._match(TokenType.COMMA):
                 break
@@ -229,7 +269,8 @@ class Parser:
         return CreateTableStatement(
             table_name=table_name,
             columns=columns,
-            if_not_exists=if_not_exists
+            if_not_exists=if_not_exists,
+            foreign_keys=foreign_keys
         )
 
     def parse_column_definition(self) -> ColumnDefinition:
@@ -266,6 +307,8 @@ class Parser:
 
         # Parse constraints
         constraints = []
+        default_value = None
+        
         while True:
             if self._match(TokenType.PRIMARY):
                 self._consume(TokenType.KEY, "Expected KEY after PRIMARY")
@@ -275,13 +318,28 @@ class Parser:
             elif self._match(TokenType.NOT):
                 self._consume(TokenType.NULL, "Expected NULL after NOT")
                 constraints.append("NOT NULL")
+            elif self._match(TokenType.DEFAULT):
+                # Parse Literal
+                if self._match(TokenType.NUMBER):
+                    default_value = int(self.previous_token().value)
+                elif self._match(TokenType.FLOAT_LITERAL):
+                    default_value = float(self.previous_token().value)
+                elif self._match(TokenType.STRING_LITERAL):
+                    default_value = self.previous_token().value
+                elif self._match(TokenType.BOOLEAN_LITERAL):
+                    default_value = self.previous_token().value.lower() == 'true'
+                elif self._match(TokenType.NULL_LITERAL):
+                    default_value = None
+                else:
+                    raise PesaSQLSyntaxError("Expected literal after DEFAULT")
             else:
                 break
 
         return ColumnDefinition(
             name=name,
             data_type=data_type,
-            constraints=constraints
+            constraints=constraints,
+            default_value=default_value
         )
 
     def parse_drop(self) -> DropTableStatement:
@@ -477,6 +535,23 @@ class Parser:
                 break
 
         return clauses
+
+    def parse_use(self) -> UseStatement:
+        """Parse USE database statement"""
+        db_name = self._consume(TokenType.IDENTIFIER, "Expected database name").value
+        return UseStatement(database_name=db_name)
+
+    def parse_delete(self) -> DeleteStatement:
+        """Parse DELETE statement"""
+        # DELETE already consumed
+        self._consume(TokenType.FROM, "Expected FROM after DELETE")
+        table_name = self._consume(TokenType.IDENTIFIER, "Expected table name").value
+        
+        where_clause = None
+        if self._match(TokenType.WHERE):
+            where_clause = self.parse_expression()
+            
+        return DeleteStatement(table_name=table_name, where_clause=where_clause)
 
     # Helper methods
     def _advance(self) -> Token:

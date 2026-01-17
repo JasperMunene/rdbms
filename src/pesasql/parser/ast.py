@@ -28,6 +28,7 @@ class JoinClause(Node):
     table_name: str
     join_type: JoinType
     on_condition: 'Expression'
+    table_alias: Optional[str] = None
 
 
 @dataclass
@@ -35,13 +36,13 @@ class SelectStatement(Node):
     """SELECT statement"""
     columns: List['Column']  # Columns to select
     table_name: str  # Table name
+    table_alias: Optional[str] = None  # Table alias (e.g., FROM merchants m)
     where_clause: Optional['Expression'] = None
     limit: Optional[int] = None
     offset: Optional[int] = None
     order_by: List['OrderByClause'] = field(default_factory=list)
 
     joins: List[JoinClause] = field(default_factory=list)
-
 
 
 @dataclass
@@ -53,11 +54,29 @@ class InsertStatement(Node):
 
 
 @dataclass
+class ColumnDefinition(Node):
+    """Column definition in CREATE TABLE"""
+    name: str
+    data_type: str  # e.g., 'INT', 'STRING(100)'
+    constraints: List[str] = field(default_factory=list)  # e.g., 'PRIMARY KEY', 'NOT NULL'
+    default_value: Any = None
+
+
+@dataclass
+class ForeignKeyDefinition(Node):
+    """Foreign key constraint in CREATE TABLE"""
+    column_name: str
+    ref_table: str
+    ref_column: str
+
+
+@dataclass
 class CreateTableStatement(Node):
     """CREATE TABLE statement"""
     table_name: str
     columns: List['ColumnDefinition']
     if_not_exists: bool = False
+    foreign_keys: List[ForeignKeyDefinition] = field(default_factory=list)
 
 
 @dataclass
@@ -65,14 +84,6 @@ class DropTableStatement(Node):
     """DROP TABLE statement"""
     table_name: str
     if_exists: bool = False
-
-
-@dataclass
-class ColumnDefinition(Node):
-    """Column definition in CREATE TABLE"""
-    name: str
-    data_type: str  # e.g., 'INT', 'STRING(100)'
-    constraints: List[str] = field(default_factory=list)  # e.g., 'PRIMARY KEY', 'NOT NULL'
 
 
 @dataclass
@@ -150,3 +161,15 @@ class OrderByClause(Node):
     """ORDER BY clause"""
     column: Column
     ascending: bool = True  # True for ASC, False for DESC
+
+
+@dataclass
+class UseStatement(Node):
+    """USE database statement"""
+    database_name: str
+
+@dataclass
+class DeleteStatement(Node):
+    """DELETE FROM table WHERE condition"""
+    table_name: str
+    where_clause: Optional[Expression]

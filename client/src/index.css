@@ -1,0 +1,28 @@
+@import "tailwindcss";
+
+@theme {
+  --color-fintech-primary: #00D4FF;
+  --color-fintech-secondary: #7B2CBF;
+  --color-fintech-card: #111318;
+  --color-fintech-bg: #050510;
+  --color-fintech-text: #E0E0E0;
+  --color-fintech-success: #00FF94;
+  --color-fintech-danger: #FF2E5B;
+
+  --font-sans: Inter, sans-serif;
+}
+
+@layer base {
+  body {
+    @apply bg-fintech-bg text-fintech-text font-sans antialiased;
+  }
+}
+
+/* Glassmorphism Utilities */
+.glass-panel {
+  @apply bg-white/5 backdrop-blur-md border border-white/10 shadow-xl;
+}
+
+.glass-card {
+  @apply bg-fintech-card/80 backdrop-blur-sm border border-white/5 shadow-lg;
+}
