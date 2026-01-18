@@ -40,19 +40,42 @@ const Merchants = () => {
         }
     };
 
+    const [editMode, setEditMode] = useState(false);
+    const [editMerchantId, setEditMerchantId] = useState(null);
+
+    const handleEdit = (merchant) => {
+        setEditMode(true);
+        setEditMerchantId(merchant.merchant_id);
+        setFormData({
+            email: merchant['users.email'] || '',
+            business_name: merchant.business_name || '',
+            mpesa_till: merchant.mpesa_till || '',
+            country: merchant.country || 'Kenya'
+        });
+        setShowModal(true);
+        setMessage(null);
+    };
+
     const handleSubmit = async (e) => {
         e.preventDefault();
         setSubmitting(true);
         setMessage(null);
 
         try {
-            const res = await api.post('/merchants', formData);
-            setMessage({ type: 'success', text: `Merchant "${res.data.business_name}" created (ID: ${res.data.merchant_id})` });
+            if (editMode && editMerchantId) {
+                const res = await api.put(`/merchants/${editMerchantId}`, formData);
+                setMessage({ type: 'success', text: `Merchant updated successfully` });
+            } else {
+                const res = await api.post('/merchants', formData);
+                setMessage({ type: 'success', text: `Merchant "${res.data.business_name}" created (ID: ${res.data.merchant_id})` });
+            }
             setFormData({ email: '', business_name: '', mpesa_till: '', country: 'Kenya' });
+            setEditMode(false);
+            setEditMerchantId(null);
             fetchMerchants();
             setTimeout(() => setShowModal(false), 1500);
         } catch (err) {
-            setMessage({ type: 'error', text: err.response?.data?.error || 'Failed to create merchant' });
+            setMessage({ type: 'error', text: err.response?.data?.error || 'Operation failed' });
         } finally {
             setSubmitting(false);
         }
@@ -70,6 +93,17 @@ const Merchants = () => {
                     {r.status}
                 </span>
             )
+        },
+        {
+            header: 'Actions', key: 'actions', render: r => (
+                <div className="flex gap-2">
+                    <button
+                        onClick={e => { e.stopPropagation(); handleEdit(r); }}
+                        className="text-fintech-primary hover:underline"
+                    >Edit</button>
+                    {/* Delete is handled by Table component prop */}
+                </div>
+            )
         }
     ];
 
@@ -81,7 +115,7 @@ const Merchants = () => {
                     <p className="text-gray-400">Manage registered businesses</p>
                 </div>
                 <button
-                    onClick={() => { setShowModal(true); setMessage(null); }}
+                    onClick={() => { setShowModal(true); setMessage(null); setEditMode(false); setFormData({ email: '', business_name: '', mpesa_till: '', country: 'Kenya' }); }}
                     className="px-4 py-2 bg-fintech-primary text-white rounded-lg hover:bg-fintech-primary/80 transition font-medium"
                 >
                     + Add Merchant
@@ -95,11 +129,11 @@ const Merchants = () => {
                 onDelete={handleDelete}
             />
 
-            {/* Add Merchant Modal */}
+            {/* Add/Edit Merchant Modal */}
             {showModal && (
                 <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
                     <div className="bg-fintech-card border border-fintech-border rounded-xl p-6 w-full max-w-md mx-4 shadow-2xl">
-                        <h3 className="text-xl font-bold text-white mb-4">Add New Merchant</h3>
+                        <h3 className="text-xl font-bold text-white mb-4">{editMode ? 'Edit Merchant' : 'Add New Merchant'}</h3>
 
                         {message && (
                             <div className={`mb-4 p-3 rounded ${message.type === 'success' ? 'bg-fintech-success/20 text-fintech-success' : 'bg-red-500/20 text-red-400'}`}>
@@ -108,25 +142,28 @@ const Merchants = () => {
                         )}
 
                         <form onSubmit={handleSubmit} className="space-y-4">
-                            <div>
-                                <label className="block text-gray-400 text-sm mb-1">Business Name *</label>
-                                <input
-                                    type="text"
-                                    value={formData.business_name}
-                                    onChange={(e) => setFormData({ ...formData, business_name: e.target.value })}
-                                    className="w-full bg-fintech-dark border border-fintech-border rounded-lg px-4 py-2 text-white focus:outline-none focus:border-fintech-primary"
-                                    required
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-gray-400 text-sm mb-1">Owner Email *</label>
-                                <input
-                                    type="email"
-                                    value={formData.email}
-                                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                                    className="w-full bg-fintech-dark border border-fintech-border rounded-lg px-4 py-2 text-white focus:outline-none focus:border-fintech-primary"
-                                    required
-                                />
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-gray-400 text-sm mb-1">Business Name *</label>
+                                    <input
+                                        type="text"
+                                        value={formData.business_name}
+                                        onChange={(e) => setFormData({ ...formData, business_name: e.target.value })}
+                                        className="w-full bg-fintech-dark border border-fintech-border rounded-lg px-4 py-2 text-white focus:outline-none focus:border-fintech-primary"
+                                        required
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-gray-400 text-sm mb-1">Owner Email *</label>
+                                    <input
+                                        type="email"
+                                        value={formData.email}
+                                        onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                                        className="w-full bg-fintech-dark border border-fintech-border rounded-lg px-4 py-2 text-white focus:outline-none focus:border-fintech-primary"
+                                        required
+                                        disabled={editMode} // Email is unique identifier for user, maybe shouldn't change easily?
+                                    />
+                                </div>
                             </div>
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
@@ -162,7 +199,7 @@ const Merchants = () => {
                                     disabled={submitting}
                                     className="flex-1 px-4 py-2 bg-fintech-primary text-white rounded-lg hover:bg-fintech-primary/80 transition disabled:opacity-50"
                                 >
-                                    {submitting ? 'Creating...' : 'Create Merchant'}
+                                    {submitting ? (editMode ? 'Updating...' : 'Creating...') : (editMode ? 'Save Changes' : 'Create Merchant')}
                                 </button>
                             </div>
                         </form>

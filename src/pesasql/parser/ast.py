@@ -173,3 +173,10 @@ class DeleteStatement(Node):
     """DELETE FROM table WHERE condition"""
     table_name: str
     where_clause: Optional[Expression]
+
+@dataclass
+class UpdateStatement(Node):
+    """UPDATE table SET col=val, ... WHERE condition"""
+    table_name: str
+    updates: List[tuple[str, Expression]] = field(default_factory=list) # List of (column_name, expression)
+    where_clause: Optional[Expression] = None

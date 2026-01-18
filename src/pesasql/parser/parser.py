@@ -40,6 +40,8 @@ class Parser:
             return self.parse_use()
         elif self._match(TokenType.DELETE):
             return self.parse_delete()
+        elif self._match(TokenType.UPDATE):
+            return self.parse_update()
         else:
             raise PesaSQLSyntaxError(f"Unexpected token: {self.current_token}")
 
@@ -540,6 +542,30 @@ class Parser:
         """Parse USE database statement"""
         db_name = self._consume(TokenType.IDENTIFIER, "Expected database name").value
         return UseStatement(database_name=db_name)
+
+    def parse_update(self) -> UpdateStatement:
+        """Parse UPDATE statement"""
+        # UPDATE already consumed
+        
+        table_name = self._consume(TokenType.IDENTIFIER, "Expected table name").value
+        
+        self._consume(TokenType.SET, "Expected SET after table name")
+        
+        updates = []
+        while True:
+            column_name = self._consume(TokenType.IDENTIFIER, "Expected column name").value
+            self._consume(TokenType.EQ, "Expected = after column name")
+            expression = self.parse_expression()
+            updates.append((column_name, expression))
+            
+            if not self._match(TokenType.COMMA):
+                break
+                
+        where_clause = None
+        if self._match(TokenType.WHERE):
+            where_clause = self.parse_expression()
+            
+        return UpdateStatement(table_name=table_name, updates=updates, where_clause=where_clause)
 
     def parse_delete(self) -> DeleteStatement:
         """Parse DELETE statement"""

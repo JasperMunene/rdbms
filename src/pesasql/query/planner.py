@@ -41,6 +41,8 @@ class Planner:
             return self.plan_drop_table(ast)
         elif isinstance(ast, DeleteStatement):
             return self.plan_delete(ast)
+        elif isinstance(ast, UpdateStatement):
+            return self.plan_update(ast)
         else:
             # Handle simple commands
             command_type = type(ast).__name__
@@ -262,6 +264,38 @@ class Planner:
             'table_name': stmt.table_name,
             'table_schema': table_schema,
             'filter_conditions': filter_conditions
+        })
+
+    def plan_update(self, stmt: UpdateStatement) -> QueryPlan:
+        """Plan UPDATE query"""
+        # Get table schema
+        table_schema = self.catalog.get_table(stmt.table_name)
+        if not table_schema:
+            raise PesaSQLExecutionError(f"Table '{stmt.table_name}' not found")
+
+        # Plan WHERE clause
+        filter_conditions = []
+        if stmt.where_clause:
+            filter_conditions = self._extract_conditions(stmt.where_clause, table_schema)
+
+        # Plan updates
+        # Need to validate columns and potentially type-check values (deferred to execution for now)
+        updates = []
+        for col_name, expr in stmt.updates:
+            column_index = self._find_column_index(col_name, table_schema)
+            # Store expression to be evaluated per row (or fixed if literal)
+            # For now, simplistic approach: pass AST expression
+            updates.append({
+                'column_index': column_index,
+                'column_name': col_name,
+                'expression': expr 
+            })
+
+        return QueryPlan('UPDATE', {
+            'table_name': stmt.table_name,
+            'table_schema': table_schema,
+            'filter_conditions': filter_conditions,
+            'updates': updates
         })
 
     def plan_create_table(self, stmt: CreateTableStatement) -> QueryPlan:

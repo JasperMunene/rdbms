@@ -101,8 +101,23 @@ class MerchantList(Resource):
 class MerchantDetail(Resource):
     def get(self, merchant_id):
         m = db_manager.get_merchant_by_id(merchant_id)
-        if not m: return {'error': 'Merchant not found'}, 404
+        if not m:
+            return {'error': 'Merchant not found'}, 404
         return m
+
+    def put(self, merchant_id):
+        data = request.get_json()
+        if not data:
+            return {'error': 'No data provided'}, 400
+        # Allowed fields to update
+        allowed = {'business_name', 'mpesa_till', 'country', 'status'}
+        updates = {k: v for k, v in data.items() if k in allowed}
+        if not updates:
+            return {'error': 'No valid fields to update'}, 400
+        res = db_manager.update_merchant(merchant_id, updates)
+        if 'error' in res:
+            return res, 400
+        return {'message': 'Merchant updated', 'merchant_id': merchant_id, 'updates': updates}, 200
     
     def delete(self, merchant_id):
         res = db_manager.delete_merchant(merchant_id)

@@ -161,6 +161,13 @@ class PesaSQLManager:
         # Cascading delete not supported? PesaSQL constraints might prevent if Transactions exist.
         return self.execute_query(f"DELETE FROM merchants WHERE merchant_id = {m_id}")
 
+    def update_merchant(self, merchant_id, updates):
+        if not updates:
+            return {'error': 'No updates provided'}
+        set_clause = ', '.join([f"{k} = '{v}'" for k, v in updates.items()])
+        sql = f"UPDATE merchants SET {set_clause} WHERE merchant_id = {merchant_id}"
+        return self.execute_query(sql)
+
     # --- Customers ---
     def add_customer(self, phone, full_name, email=''):
         res = self.execute_query("SELECT customer_id FROM customers ORDER BY customer_id DESC LIMIT 1")

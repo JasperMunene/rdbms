@@ -15,6 +15,7 @@ class TokenType:
     INTO = 'INTO'
     VALUES = 'VALUES'
     UPDATE = 'UPDATE'
+    SET = 'SET'
     DELETE = 'DELETE'
     FROM = 'FROM'
     WHERE = 'WHERE'
@@ -134,6 +135,7 @@ class Lexer:
         (r'(?i)INTO\b', TokenType.INTO),
         (r'(?i)VALUES\b', TokenType.VALUES),
         (r'(?i)UPDATE\b', TokenType.UPDATE),
+        (r'(?i)SET\b', TokenType.SET),
         (r'(?i)DELETE\b', TokenType.DELETE),
         (r'(?i)FROM\b', TokenType.FROM),
         (r'(?i)WHERE\b', TokenType.WHERE),

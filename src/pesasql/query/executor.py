@@ -107,6 +107,8 @@ class Executor:
             return self.execute_drop_table(plan)
         elif plan_type == 'DELETE':
             return self.execute_delete(plan)
+        elif plan_type == 'UPDATE':
+            return self.execute_update(plan)
         else:
             # Handle simple commands
             return {'status': 'executed', 'plan': plan_type}
@@ -221,6 +223,82 @@ class Executor:
         return {
             'table_name': table_name,
             'rows_deleted': rows_deleted
+        }
+
+    def execute_update(self, plan: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute UPDATE query"""
+        from ..storage.page import Page
+        
+        table_name = plan['table_name']
+        table_schema = plan['table_schema']
+        filter_conditions = plan.get('filter_conditions', [])
+        updates = plan['updates'] # List of {column_index, expression, ...}
+        
+        # Find table pages
+        data_pages = self._find_table_pages(table_name)
+        
+        rows_updated = 0
+        
+        for page_id in data_pages:
+            page = self.file_manager.read_page(page_id)
+            rows = self._extract_rows_from_page(page, table_schema)
+            
+            page_rows_updated = 0
+            updated_rows = []
+            
+            for row in rows:
+                if self._row_matches_conditions(row, filter_conditions):
+                    # Apply updates
+                    for update in updates:
+                        col_idx = update['column_index']
+                        expr = update['expression']
+                        
+                        # Evaluate expression - currently supporting literals ONLY for simplicity
+                        # In real DB, we'd evaluate expression per row
+                        if hasattr(expr, 'literal'):
+                             new_value = expr.literal.to_value()
+                        else:
+                             # Try fallback if Planner extracted it simpler?
+                             # For now, simplistic
+                             raise PesaSQLExecutionError("Only literal values supported in UPDATE currently")
+                        
+                        # Type Check/Coercion (Simplified)
+                        # ... would go here ...
+                        
+                        row.set_value(col_idx, new_value)
+                    
+                    rows_updated += 1
+                    page_rows_updated += 1
+                
+                updated_rows.append(row)
+            
+            if page_rows_updated > 0:
+                # Rewrite Page with updated rows
+                # Reset free space
+                header_end_offset = 13 + 64
+                page.write_short(9, header_end_offset) 
+                
+                cursor = header_end_offset
+                for row in updated_rows:
+                    row_data = row.serialize()
+                    row_len = len(row_data)
+                    
+                    # Check for page overflow (Split? For now, assume fits or error)
+                    if cursor + 4 + row_len > PAGE_SIZE:
+                         raise PesaSQLExecutionError("Page overflow during UPDATE - Page Splitting not implemented")
+
+                    page.write_int(cursor, row_len)
+                    cursor += 4
+                    page.write_bytes(cursor, row_data)
+                    cursor += row_len
+                
+                page.write_short(9, cursor)
+                page.is_dirty = True
+                self.file_manager.write_page_with_wal(page)
+
+        return {
+            'table_name': table_name,
+            'rows_updated': rows_updated
         }
 
     def execute_select(self, plan: Dict[str, Any]) -> List[Row]:
