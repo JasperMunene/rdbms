@@ -71,9 +71,6 @@ const Dashboard = () => {
                             ⚠️ Demonstrating <span className="font-mono bg-white/10 px-1 rounded">INNER JOIN merchants</span> & <span className="font-mono bg-white/10 px-1 rounded">LEFT JOIN customers</span>
                         </p>
                     </div>
-                    <button className="px-4 py-2 text-sm bg-white/5 hover:bg-white/10 rounded-lg transition-colors border border-white/10">
-                        Export CSV
-                    </button>
                 </div>
 
                 <div className="overflow-x-auto">
@@ -120,8 +117,8 @@ const Dashboard = () => {
                                         </td>
                                         <td className="px-6 py-4 text-center">
                                             <span className={`px-2 py-1 rounded text-xs border ${tx.status === 'completed'
-                                                    ? 'bg-fintech-success/10 text-fintech-success border-fintech-success/20'
-                                                    : 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20'
+                                                ? 'bg-fintech-success/10 text-fintech-success border-fintech-success/20'
+                                                : 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20'
                                                 }`}>
                                                 {tx.status}
                                             </span>

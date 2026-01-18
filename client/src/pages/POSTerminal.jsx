@@ -5,9 +5,28 @@ import api from '../services/api';
 const POSTerminal = () => {
     const [amount, setAmount] = useState('0');
     const [phone, setPhone] = useState('');
+    const [customerName, setCustomerName] = useState('');
     const [customer, setCustomer] = useState(null);
+    const [merchants, setMerchants] = useState([]);
+    const [selectedMerchant, setSelectedMerchant] = useState('');
     const [loading, setLoading] = useState(false);
     const [status, setStatus] = useState('idle'); // idle, processing, success, error
+
+    // Fetch merchants on mount
+    useEffect(() => {
+        const fetchMerchants = async () => {
+            try {
+                const res = await api.get('/merchants');
+                setMerchants(res.data);
+                if (res.data.length > 0) {
+                    setSelectedMerchant(res.data[0].merchant_id);
+                }
+            } catch (err) {
+                console.error('Failed to load merchants', err);
+            }
+        };
+        fetchMerchants();
+    }, []);
 
     // "Index Scan" Simulation: Auto-fetch customer when valid phone length reached
     useEffect(() => {
@@ -17,6 +36,7 @@ const POSTerminal = () => {
                 try {
                     const res = await api.get(`/customers/${phone}`);
                     setCustomer(res.data);
+                    setCustomerName(res.data.full_name || '');
                 } catch (err) {
                     setCustomer(null); // Not found or error
                 } finally {
@@ -41,15 +61,17 @@ const POSTerminal = () => {
         setStatus('processing');
         try {
             await api.post('/transactions', {
+                merchant_id: selectedMerchant,
                 amount: parseFloat(amount),
                 customer_phone: phone,
-                business_name: 'Jasper Tech' // Hardcoded for demo if not in merchant context
+                customer_name: customerName
             });
             setStatus('success');
             setTimeout(() => {
                 setStatus('idle');
                 setAmount('0');
                 setPhone('');
+                setCustomerName('');
                 setCustomer(null);
             }, 3000);
         } catch (err) {
@@ -77,8 +99,8 @@ const POSTerminal = () => {
                             key={key}
                             onClick={() => key === 'C' ? handleClear() : handleDigit(key.toString())}
                             className={`rounded-xl text-2xl font-bold transition-all active:scale-95 ${key === 'C'
-                                    ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30'
-                                    : 'bg-white/5 text-white hover:bg-white/10'
+                                ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30'
+                                : 'bg-white/5 text-white hover:bg-white/10'
                                 }`}
                         >
                             {key}
@@ -87,13 +109,32 @@ const POSTerminal = () => {
                 </div>
             </div>
 
-            {/* Right Col: Customer & Action */}
+            {/* Right Col: Merchant, Customer & Action */}
             <div className="flex flex-col gap-6">
+                {/* Merchant Selection */}
+                <div className="glass-card p-6 rounded-2xl">
+                    <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full bg-fintech-secondary"></span>
+                        Pay To Merchant
+                    </h3>
+                    <select
+                        value={selectedMerchant}
+                        onChange={(e) => setSelectedMerchant(e.target.value)}
+                        className="w-full bg-black/30 border border-white/10 rounded-lg px-4 py-3 text-white text-lg focus:border-fintech-primary focus:outline-none transition-colors"
+                    >
+                        {merchants.map(m => (
+                            <option key={m.merchant_id} value={m.merchant_id}>
+                                {m.business_name} (Till: {m.mpesa_till || 'N/A'})
+                            </option>
+                        ))}
+                    </select>
+                </div>
+
                 {/* Customer Lookup Card */}
                 <div className="glass-card p-6 rounded-2xl relative overflow-hidden">
                     <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
                         <span className="w-2 h-2 rounded-full bg-fintech-primary"></span>
-                        Customer Identification
+                        Customer Details
                     </h3>
 
                     <div className="space-y-4">
@@ -105,6 +146,17 @@ const POSTerminal = () => {
                                 onChange={(e) => setPhone(e.target.value)}
                                 placeholder="+254..."
                                 className="w-full bg-black/30 border border-white/10 rounded-lg px-4 py-3 text-white text-lg font-mono focus:border-fintech-primary focus:outline-none transition-colors mt-1"
+                            />
+                        </div>
+
+                        <div>
+                            <label className="text-xs text-gray-400 uppercase">Customer Name</label>
+                            <input
+                                type="text"
+                                value={customerName}
+                                onChange={(e) => setCustomerName(e.target.value)}
+                                placeholder="Full Name"
+                                className="w-full bg-black/30 border border-white/10 rounded-lg px-4 py-3 text-white text-lg focus:border-fintech-primary focus:outline-none transition-colors mt-1"
                             />
                         </div>
 
@@ -130,7 +182,7 @@ const POSTerminal = () => {
                                     <div className="flex justify-between items-start">
                                         <div>
                                             <p className="text-fintech-success font-bold text-lg">{customer.full_name}</p>
-                                            <p className="text-white/60 text-sm">Valid Customer Found</p>
+                                            <p className="text-white/60 text-sm">Existing Customer Found</p>
                                         </div>
                                         <div className="bg-fintech-success text-black text-xs font-bold px-2 py-1 rounded">MATCH</div>
                                     </div>
@@ -143,10 +195,10 @@ const POSTerminal = () => {
                 {/* Action Button */}
                 <button
                     onClick={handlePayment}
-                    disabled={status === 'processing' || amount === '0' || !phone}
+                    disabled={status === 'processing' || amount === '0' || !phone || !selectedMerchant}
                     className={`mt-auto w-full py-6 rounded-2xl font-bold text-xl transition-all relative overflow-hidden ${status === 'success' ? 'bg-fintech-success text-black' :
-                            status === 'error' ? 'bg-red-500 text-white' :
-                                'bg-gradient-to-r from-fintech-primary to-fintech-secondary text-white hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed'
+                        status === 'error' ? 'bg-red-500 text-white' :
+                            'bg-gradient-to-r from-fintech-primary to-fintech-secondary text-white hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed'
                         }`}
                 >
                     {status === 'processing' ? 'Processing Transaction...' :
