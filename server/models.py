@@ -18,6 +18,11 @@ from pesasql.query.engine import QueryEngine
 class PesaSQLManager:
     def __init__(self, db_path='finance.db'):
         self.fm = FileManager(db_path)
+        
+        # Create database file if it doesn't exist
+        if not self.fm.db_path.exists():
+            self.fm.create_database()
+        
         self.catalog = Catalog(self.fm)
         self.engine = QueryEngine(self.fm, self.catalog)
         self._create_default_tables()
