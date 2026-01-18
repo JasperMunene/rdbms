@@ -113,10 +113,14 @@ npm run dev
 ### 3. Accessing the Application
 
 1.  Open your browser to `http://localhost:5173`.
-2.  **Register a new account** (The DB starts fresh if `finance.db` was deleted).
-3.  Navigate to **Merchants** to view your profile.
-4.  Use **Customers** to add/delete customers.
-5.  **Simulate Transactions** using the POS Terminal or Transaction API.
+2.  **Register a new account** (The DB starts fresh if `finance.db` is deleted).
+3.  Navigate to **Dashboard** to view summary statistics (total merchants, transactions, revenue).
+4.  Go to **Merchants** to **Add**, **Edit**, or **Delete** merchant profiles.
+5.  Use the **POS Terminal** to create transactions by:
+    *   Selecting a merchant from the dropdown.
+    *   Entering customer name and phone number.
+    *   Specifying the transaction amount.
+6.  View all transactions on the **Dashboard** or via the Transactions list.
 
 ---
 
