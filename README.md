@@ -131,3 +131,8 @@ npm run dev
 ## Resources
 
 *   [Let's Build a Simple Database](https://cstack.github.io/db_tutorial/) by cstack - A massive inspiration for the architecture of the PesaSQL storage engine and Pager implementation.
+
+This project utilized AI-powered tools to assist with:
+*   **UI Development**: Generating and iterating on React component code for the frontend dashboard.
+*   **Debugging**: Identifying and resolving issues across the PesaSQL engine and Flask API layer.
+
