@@ -64,7 +64,40 @@ class DashboardStats(Resource):
 class MerchantList(Resource):
     def get(self):
         return db_manager.get_merchants()
-
+    
+    def post(self):
+        data = request.get_json()
+        if not data:
+            return {'error': 'No data provided'}, 400
+        
+        required = ['email', 'business_name']
+        if not all(k in data for k in required):
+            return {'error': 'Missing required fields: email, business_name'}, 400
+        
+        # Check existing user
+        if db_manager.get_user_by_email(data['email']):
+            return {'error': 'User with this email already exists'}, 409
+        
+        # Hash password
+        # Auto-generate default password
+        default_password = 'changeme123'
+        hashed = bcrypt.hashpw(default_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+        
+        # Create User
+        user_id = db_manager.register_user(data['email'], hashed)
+        
+        # Create Merchant Profile
+        country = data.get('country', 'Kenya')
+        till = data.get('mpesa_till', '')
+        
+        merchant_id = db_manager.add_merchant(user_id, data['business_name'], till, country)
+        
+        return {
+            'message': 'Merchant created successfully',
+            'merchant_id': merchant_id,
+            'user_id': user_id,
+            'business_name': data['business_name']
+        }, 201
 class MerchantDetail(Resource):
     def get(self, merchant_id):
         m = db_manager.get_merchant_by_id(merchant_id)
